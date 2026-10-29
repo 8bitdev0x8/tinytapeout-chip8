@@ -25,6 +25,9 @@ jobs:
 
       - name: Run tests
         run: |
+          python firmware/build_interpreter.py
+          git diff --exit-code -- firmware/interpreter.bin firmware/interpreter-map.json
+          python test/check_interpreter.py
           mkdir -p build
           iverilog -g2012 -s tb_chip8_core -o build/chip8_tb src/chip8_core.v test/tb_chip8_core.v
           vvp build/chip8_tb

@@ -1,32 +1,31 @@
 ## How it works
 
-A classic CHIP-8 CPU with sixteen registers, a 16-level external call stack,
-60 Hz timers, and an external 64x32 framebuffer. The Feather RP2350 companion
-supplies RAM and keypad state and renders video. All conventional CHIP-8
-instructions are implemented; legacy 0nnn calls are ignored. No Super-CHIP
-or XO-CHIP extensions. See docs/architecture.md in the repository for the
-complete compatibility profile and memory protocol.
-
-The 2x2 IHP allocation and 1 MHz clock are provisional build targets.
+A one-tile accumulator processor executes an external 2,080-byte interpreter
+that implements the conventional CHIP-8 instruction set. The Feather RP2350
+serves memory, displays the 64x32 framebuffer over HSTX, and supplies UART
+controller state from an ESP32. CHIP-8 execution takes place on the ASIC.
+All V registers and interpreter working state reside in external RAM.
+The ASIC retains a shared arithmetic datapath, timers and native control.
 
 ## How to test
 
-Initialize the companion RAM and font, load a ROM at 0x200, and clear the
-framebuffer. Hold reset low for multiple clock edges with acknowledgement
-low. Release reset with ena high. Service the three-phase byte bus using
-four-phase request/acknowledge handshakes. Phase 0 sends address low, phase 1
-address high, and phase 2 transfers data. uo[2] is request; ui[0] is ack. The shared byte bus is uio[7:0].
-The companion drives it only during a phase-2 read, releasing it before ack
-falls.
-The chip synchronizes ack. Hold response data stable throughout acknowledge.
+Load firmware/interpreter.bin at 0x1200, the CHIP-8 font at 0x050, and a game
+at 0x200. Clear game RAM/framebuffer, hold reset low with acknowledge low,
+then release reset with ena high. The native processor boots at 0x1200.
+The 13-bit memory map and pin-level protocol are documented in
+ docs/architecture.md in the project repository.
 
-Run the cocotb suite for instruction-level comparison, framebuffer writes,
-keypad behavior, timer operation and stack faults. The GitHub GDS workflow
-also runs the suite against the physical gate-level netlist.
+The shared byte bus is uio[7:0]; uo[1:0] selects address-low, address-high,
+or data phase. uo[2] is request, ui[0] is ack. Each phase uses a four-phase
+handshake. The companion drives the byte bus only during a phase-2 read,
+releasing it before lowering ack. uo[4] is sound enable; uo[5] is halt.
+
+Run the physical-port test suite on both RTL and the gate-level netlist.
+Independent logo/opcode/flags ROMs must match their reference screenshots.
 
 ## External hardware
 
-Adafruit Feather RP2350 with HSTX adapter and HDMI monitor; ESP32 with a
-Bluetooth DualSense controller forwards reports at 230400 baud to Feather
-RX. Companion firmware and final physical wiring remain to be implemented.
-The simulation supplies a memory/controller model without external hardware.
+Adafruit Feather RP2350 with HSTX adapter and monitor; ESP32 forwarding
+Bluetooth DualSense reports at 230400 baud to Feather RX. The Feather must
+provide an 8 KB memory map including native ROM and working RAM. Real firmware,
+physical wiring, and gameplay throughput have not yet been validated.

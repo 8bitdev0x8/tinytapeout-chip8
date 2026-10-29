@@ -2,7 +2,7 @@
 import random
 from pathlib import Path
 import cocotb
-from cocotb.triggers import Timer
+from cocotb.triggers import Timer, RisingEdge, with_timeout
 
 FONT = bytes.fromhex(
     "f0909090f0 2060202070 f010f080f0 f010f010f0 9090f01010 "
@@ -17,6 +17,8 @@ def image(ops, data=None):
         ram[0x200 + 2*i:0x202 + 2*i] = op.to_bytes(2, 'big')
     for address, values in (data or {}).items():
         ram[address:address+len(values)] = values
+    blob = (Path(__file__).parents[1]/'firmware/interpreter.bin').read_bytes()
+    ram[0x1200:0x1200+len(blob)] = blob
     return ram
 
 
@@ -115,98 +117,37 @@ class Reference:
 
 
 class Companion:
-    def __init__(self, dut, ram, key_source=None):
+    """The Verilog companion services pins; Python only loads and checks images.
+    Keeping the memory server inside the testbench avoids a Python callback on
+    every native clock, while testing the same external protocol on RTL/gates.
+    """
+    def __init__(self, dut, ram, key_profile=None):
         self.dut, self.ram = dut, bytearray(ram)
-        self.key_source = key_source or (lambda cycle, polls: 0)
-        self.cycles = 0
-        self.polls = 0
-        self.key_snapshot = 0
-        self.writes = []
-        self.ack = False
-        self.parts = []
-        self.stable = None
-        self.sound_seen = False
-        self.delay = 0
-        self.read_counts = {}
-        self.sound_start = None
-        self.sound_stop = None
+        self.key_profile = key_profile or {}
+        self.writes=[]
 
-    async def cycle(self):
-        d = self.dut
-        d.clk.value = 0
-        await Timer(100, unit='ns')
-        status, output = int(d.uo_out.value), int(d.uio_out.value)
-        request, phase, write = bool(status&4), status&3, bool(status&8)
-        expected_oe = 0 if phase == 2 and not write else 255
-        assert int(d.uio_oe.value) == expected_oe, 'Shared bus direction incorrect'
-        if status&16 and self.sound_start is None: self.sound_start = self.cycles
-        if self.sound_seen and not status&16 and self.sound_stop is None:
-            self.sound_stop = self.cycles
-        self.sound_seen |= bool(status&16)
-        if phase == 2 and not write:
-            output = 0  # chip output path is disconnected while companion drives
-        if request and self.stable is not None:
-            assert (phase, write, output) == self.stable, 'Bus changed before acknowledge'
-        if not request:
-            self.ack = False
-            self.stable = None
-            self.delay = 0
-        elif not self.ack:
-            self.stable = (phase, write, output)
-            self.delay += 1
-            # Deliberate varying delays before acknowledgement.
-            if self.delay >= 1+(self.cycles%4):
-                if phase == 0:
-                    assert not self.parts
-                    self.parts = [output]
-                elif phase == 1:
-                    assert len(self.parts) == 1
-                    self.parts.append(output)
-                else:
-                    assert phase == 2 and len(self.parts) == 2
-                    address = self.parts[0] | (self.parts[1]<<8)
-                    self.parts = []
-                    if write:
-                        assert address < 0x1120, 'Write to read-only keypad'
-                        self.ram[address] = output
-                        self.writes.append((address, output))
-                    else:
-                        self.read_counts[address] = self.read_counts.get(address, 0)+1
-                        if address == 0x1120:
-                            self.polls += 1
-                            self.key_snapshot = self.key_source(self.cycles, self.polls)
-                            value = self.key_snapshot&255
-                        elif address == 0x1121:
-                            value = self.key_snapshot>>8
-                        else: value = self.ram[address]
-                        d.uio_in.value = value
-                self.ack = True
-        d.ui_in.value = 1 if self.ack else 0
-        await Timer(400, unit='ns')
-        d.clk.value = 1
-        await Timer(500, unit='ns')
-        self.cycles += 1
-        return bool(int(d.uo_out.value)&32)
-
-    async def reset(self):
-        d = self.dut
-        d.clk.value = 0
-        d.ena.value = 1
-        d.rst_n.value = 0
-        d.ui_in.value = 0
-        d.uio_in.value = 0
-        for _ in range(4):
-            d.clk.value = 0
-            await Timer(500, unit='ns')
-            d.clk.value = 1
-            await Timer(500, unit='ns')
-        d.rst_n.value = 1
-
-    async def run(self, limit=100000):
-        await self.reset()
-        for _ in range(limit):
-            if await self.cycle(): return
-        raise AssertionError(f'Core did not halt after {limit} cycles')
+    async def run(self, limit=30000000, watch_addr=None):
+        d=self.dut
+        d.rst_n.value=0
+        await Timer(4000,unit='ns')
+        for address,value in enumerate(self.ram): d.memory[address].value=value
+        d.max_cycles.value=limit
+        d.watch_enable.value=int(watch_addr is not None)
+        d.watch_addr.value=watch_addr or 0
+        for name in ('key_initial','key_later','key_switch_poll','timed_keys','key_on_cycle','key_off_cycle'):
+            getattr(d,name).value=self.key_profile.get(name,0)
+        d.rst_n.value=1
+        await with_timeout(RisingEdge(d.finished), (limit+10)*1000, 'ns')
+        await Timer(1,unit='ns')
+        assert not int(d.error.value), 'Companion model reported protocol error or cycle limit'
+        self.cycles=int(d.cycle_count.value)
+        self.polls=int(d.poll_count.value)
+        self.sound_seen=int(d.sound_start.value)!=0
+        self.sound_start=int(d.sound_start.value)
+        self.sound_stop=int(d.sound_stop.value)
+        for address in range(8192): self.ram[address]=int(d.memory[address].value)
+        self.writes=[(int(d.trace[i].value)>>8,int(d.trace[i].value)&255)
+                     for i in range(int(d.write_count.value))]
 
 
 async def compare(dut, ops, data=None):
@@ -216,7 +157,7 @@ async def compare(dut, ops, data=None):
     companion = Companion(dut, ram)
     await companion.run()
     assert companion.writes == reference.writes, 'Memory write trace differs from instruction model'
-    assert companion.ram == reference.ram
+    assert companion.ram[:0x1122] == reference.ram[:0x1122]
     return companion
 
 
@@ -274,7 +215,7 @@ async def sprites_clear_collision_clipping(dut):
 async def keypad_skip_and_wait_release(dut):
     ram = image([0x600a, 0xe09e, 0x61ee, 0xe0a1, 0x6207,
                  0xf30a, 0xa900, 0xf355, 0xffff])
-    c = Companion(dut, ram, lambda cycle, polls: (1<<10) if polls < 10 else 0)
+    c = Companion(dut, ram, {'key_initial':1<<10,'key_switch_poll':10})
     await c.run()
     assert c.ram[0x900:0x904] == bytes([10,0,7,10])
     assert c.polls >= 10
@@ -292,14 +233,14 @@ async def timers_run_during_key_wait(dut):
     # Timers must keep running while execution is waiting on external input.
     ram = image([0x6002, 0xf015, 0xf018, 0xf10a, 0xf207,
                  0xa900, 0xf255, 0xffff])
-    def key_source(cycle, polls):
-        return 1 if 51000 <= cycle < 53000 else 0
-    c = Companion(dut, ram, key_source)
-    await c.run(limit=60000)
+    c = Companion(dut, ram, {'timed_keys':1,'key_initial':1,
+                            'key_on_cycle':300000,'key_off_cycle':350000})
+    await c.run(limit=2000000)
     assert c.sound_seen and not int(dut.uo_out.value)&16
     assert c.ram[0x900:0x903] == bytes([2,0,0])
-    # The divider is reset with the CPU, so the second tick is at 33334 clocks.
-    assert 33330 <= c.sound_stop <= 33340, c.sound_stop
+    # Integer divider ticks every 16666 clocks; timer writes may occur at any phase.
+    expected_stop = ((c.sound_start-1)//16666+2)*16666+1
+    assert abs(c.sound_stop-expected_stop) <= 4, (c.sound_start,c.sound_stop,expected_stop)
 
 
 @cocotb.test()
@@ -350,14 +291,10 @@ async def independent_test_rom_screens(dut):
         assert reference.ram[0x1000:0x1100] == expected, name+' reference screen mismatch'
         assert reference.loop_pc is not None
         companion = Companion(dut, initial)
-        await companion.reset()
-        for _ in range(500000):
-            assert not await companion.cycle(), name+' unexpectedly halted'
-            if companion.read_counts.get(reference.loop_pc, 0) >= 3:
-                break
-        else: raise AssertionError(name+' never reached final loop')
+        await companion.run(watch_addr=reference.loop_pc)
+        assert not int(dut.uo_out.value)&32, name+' unexpectedly halted' 
         assert companion.ram[0x1000:0x1100] == expected, name+' hardware screen mismatch'
         assert companion.writes == reference.writes, name+' write trace mismatch'
         Path('output').mkdir(exist_ok=True)
         Path('output', name+'.frame').write_bytes(companion.ram[0x1000:0x1100])
-        dut._log.info('%s matches all 2048 reference pixels', name)
+        dut._log.info('%s matches all 2048 reference pixels in %d clocks', name, companion.cycles)

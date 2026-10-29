@@ -2,11 +2,10 @@ project:
   title: CHIP-8 Feather companion core
   author: jojys
   discord: ''
-  description: Classic CHIP-8 CPU with external memory, framebuffer and keypad on
-    RP2350
+  description: One-tile CHIP-8 interpreter engine with external ROM and RAM on RP2350
   language: Verilog
   clock_hz: 1000000
-  tiles: 2x2
+  tiles: 1x1
   top_module: tt_um_chip8_feather
   source_files:
   - project.v
