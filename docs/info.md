@@ -1,6 +1,6 @@
 ## How it works
 
-A one-tile accumulator processor executes an external 2,080-byte interpreter
+A one-tile accumulator processor executes an external 1,824-byte interpreter
 that implements the conventional CHIP-8 instruction set. The Feather RP2350
 serves memory, displays the 64x32 framebuffer over HSTX, and supplies UART
 controller state from an ESP32. CHIP-8 execution takes place on the ASIC.

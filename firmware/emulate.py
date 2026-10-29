@@ -3,7 +3,7 @@ class Engine:
     def __init__(self, ram):
         self.ram=bytearray(ram);self.pc=0x1200;self.p=0;self.a=0
         self.zero=True;self.carry=False;self.rng=0xace1
-        self.halted=False;self.writes=[];self.steps=0
+        self.halted=False;self.writes=[];self.steps=0;self.shift=0;self.dt=0;self.st=0
     def store(self,address):
         self.ram[address]=self.a
         if not 0x1130<=address<0x1200:self.writes.append((address,self.a))
@@ -29,7 +29,11 @@ class Engine:
                 self.a=self.rng&255
                 b=((self.rng>>15)^(self.rng>>13)^(self.rng>>12)^(self.rng>>10))&1
                 self.rng=((self.rng<<1)|b)&65535
-            elif sub==14:self.a=0
+            elif sub==14:
+                if k==0:self.a=self.dt
+                elif k==1:self.dt=self.a;return
+                elif k==2:self.st=self.a;return
+                else:self.halted=True;return
             else:self.halted=True;return
             self.zero=self.a==0
         elif n in (1,3,4,5,6,7):
@@ -48,5 +52,19 @@ class Engine:
                 self.pc=0x1000|(op&4095)
         elif n in (13,14):self.p=((n-13)<<12)|(op&4095)
         elif n==15:
-            self.a=(self.p>>8) if op&256 else self.ram[0x1100|k]
+            if sub==1:self.a=self.p>>8
+            elif sub==2:self.shift=self.a&7;return
+            elif sub==3:
+                shifted=(self.a<<8)>>self.shift
+                masks=[shifted>>8]
+                if self.shift and self.p%8!=7 and shifted&255:masks.append(shifted&255)
+                collision=0
+                for i,mask in enumerate(masks):
+                    address=self.p+i
+                    collision|=bool(self.ram[address]&mask)
+                    self.ram[address]^=mask
+                    self.writes.append((address,self.ram[address]))
+                self.p+=len(masks)-1
+                self.a=int(collision)
+            else:self.a=self.ram[0x1100|k]
             self.zero=self.a==0

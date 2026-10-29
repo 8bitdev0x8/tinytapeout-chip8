@@ -16,6 +16,10 @@ The interpreter ROM is required alongside every game image.
 On-chip state consists of an 8-bit accumulator, 13-bit memory pointer,
 12-bit native program counter, 16-bit instruction register, zero/carry flags,
 control state, 16-bit random generator, timer divider, and two 8-bit timers.
+A five-bit sprite-row controller shares the accumulator, pointer, add/subtract
+unit and instruction register. It XORs an aligned/shifted 8-bit sprite row
+into one or two framebuffer bytes and reports collisions, clipping the
+second byte at the right edge. This avoids interpreting every pixel.
 There is one shared 13-bit add/subtract datapath for native PC increments,
 pointer increments, and accumulator arithmetic. CHIP-8 V registers, PC, I,
 stack pointer and drawing temporaries reside in companion RAM.
@@ -32,10 +36,10 @@ stack pointer and drawing temporaries reside in companion RAM.
 | 0x1130–0x11FF | Reserved interpreter working RAM |
 | 0x1140–0x114F | V0 through VF within working RAM |
 | 0x1150–0x116C | Interpreter PC, I, stack pointer and temporaries |
-| 0x1200–0x1A1F | Required 2,080-byte interpreter ROM |
-| 0x1A20–0x1FFF | Unused/reserved |
+| 0x1200–0x191F | Required 1,824-byte interpreter ROM |
+| 0x1920–0x1FFF | Unused/reserved |
 
-An 8 KB memory array is sufficient. Occupied storage is approximately 6.4 KiB;
+An 8 KB memory array is sufficient. Occupied storage is approximately 6.1 KiB;
 the game still has the same 4 KB address space. The native ROM is generated
 by firmware/build_interpreter.py, with a label map for debugging. It must be
 served unchanged at 0x1200. Interpreter RAM is initialized by the ASIC's boot
@@ -108,11 +112,22 @@ not the external CHIP-8 PC/V0. CHIP-8 state can be inspected in working RAM.
 A native instruction emulator validates the generated ROM against an
 independent CHIP-8 model. RTL and gate-level tests use a Verilog companion
 that services only physical ports, checks bus stability and direction,
-inserts waits, and records architectural memory writes. Interpreter RAM
-writes are excluded from the CHIP-8 reference trace comparison.
+inserts waits, and records architectural memory writes. Interpreter RAM writes are excluded
+from reference traces. Framebuffer writes are coalesced by the row engine,
+so data/stack write ordering is checked while framebuffer contents and
+collision results are compared exactly against the reference.
 
 Tests cover all opcodes, VF aliases, address wrapping, stack faults, clipped
 sprites, keypad waits and timers. Four independent Timendus ROMs must match
 every pixel of the published reference screenshots. Assets are pinned and
 retain their GPL-3.0 license under test/roms. The chosen compatibility profile
 is not claimed to reproduce every historical COSMAC VIP quirk.
+
+## Native sprite operations
+
+Native word F200 sets the sprite bit offset from accumulator bits 2:0.
+F300 takes the sprite byte in A and framebuffer-byte address in P. It performs
+read/XOR/write operations on the ASIC and returns collision 0/1 in A, setting
+zero accordingly. P advances if a second byte is touched. The row engine
+reuses the low instruction byte for writeback data. Vertical clipping and
+sprite origin normalization are handled by the interpreter before F300.

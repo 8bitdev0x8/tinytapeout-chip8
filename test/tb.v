@@ -95,9 +95,11 @@ module tb;
         end
     end
     initial begin
-        $dumpfile("tb.fst");
-        $dumpvars(1,tb);
-        $dumpvars(0,tb.user_project);
+        if($test$plusargs("WAVES")) begin
+            $dumpfile("tb.fst");
+            $dumpvars(1,tb);
+            $dumpvars(0,tb.user_project);
+        end
     end
 endmodule
 `default_nettype wire

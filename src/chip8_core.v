@@ -8,7 +8,7 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
     output wire halted, output wire sound_active,
     output wire [11:0] debug_pc, output wire [7:0] debug_v0
 );
-    localparam FH=3'd0, FL=3'd1, EXEC=3'd2, READ=3'd3, WRITE=3'd4, STOP=3'd5;
+    localparam FH=3'd0, FL=3'd1, EXEC=3'd2, READ=3'd3, WRITE=3'd4, STOP=3'd5, DRAW_READ=3'd6, DRAW_WRITE=3'd7;
     localparam integer DIVISOR=CLOCK_HZ/60;
     localparam integer TIMER_BITS=$clog2(DIVISOR);
     reg [2:0] state;
@@ -17,6 +17,10 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
     reg [15:0] instruction;
     reg [7:0] accumulator;
     reg zero, carry;
+    reg [2:0] draw_shift;
+    reg draw_half, draw_collision;
+    wire [15:0] shifted_sprite={accumulator,8'd0} >> draw_shift;
+    wire [7:0] draw_mask=draw_half ? shifted_sprite[7:0] : shifted_sprite[15:8];
     reg [7:0] delay_timer, sound_timer;
     reg [TIMER_BITS-1:0] tick_count;
     reg [15:0] random_state;
@@ -33,7 +37,7 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
         lhs={5'd0,accumulator}; rhs={5'd0,operand}; subtract=alu_sub;
         if (state==FH || state==FL) begin
             lhs={1'b0,pc}; rhs=13'd1; subtract=0;
-        end else if (state==EXEC && operation==0 && subop==10) begin
+        end else if ((state==EXEC && operation==0 && subop==10) || state==DRAW_WRITE) begin
             lhs=pointer; rhs=13'd1; subtract=0;
         end
         result=sum[7:0];
@@ -58,13 +62,13 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
         end
     end
     always @* begin
-        mem_valid=rst_n && (state==FH || state==FL || state==READ || state==WRITE);
-        mem_write=(state==WRITE);
+        mem_valid=rst_n && (state==FH || state==FL || state==READ || state==WRITE || state==DRAW_READ || state==DRAW_WRITE);
+        mem_write=(state==WRITE || state==DRAW_WRITE);
         mem_addr=pointer;
         if (state==FH || state==FL) mem_addr={1'b1,pc};
-        else if (operation==12 || operation==15) mem_addr={5'h11,immediate};
+        else if ((state==READ || state==WRITE) && (operation==12 || operation==15)) mem_addr={5'h11,immediate};
     end
-    assign mem_wdata=accumulator;
+    assign mem_wdata=(state==DRAW_WRITE) ? instruction[7:0] : accumulator;
     assign halted=(state==STOP);
     assign sound_active=(sound_timer!=0) && !halted && rst_n;
     assign debug_pc=pc;
@@ -72,7 +76,7 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
     always @(posedge clk) begin
         if (!rst_n) begin
             state<=FH; pc<=12'h200; pointer<=0; instruction<=0;
-            accumulator<=0; zero<=1; carry<=0;
+            accumulator<=0; zero<=1; carry<=0; draw_shift<=0;draw_half<=0;draw_collision<=0;
             delay_timer<=0; sound_timer<=0; tick_count<=0; random_state<=16'hace1;
         end else begin
             if (tick_count==0) begin
@@ -119,9 +123,12 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
                         11: if(carry) pc<=instruction[11:0];
                         13,14: pointer<={operation[0] ^ 1'b1,instruction[11:0]};
                         15: begin
-                            if(instruction[8]) begin
-                                accumulator<={3'd0,pointer[12:8]};zero<=(pointer[12:8]==0);
-                            end else state<=READ;
+                            case(subop)
+                                1: begin accumulator<={3'd0,pointer[12:8]};zero<=(pointer[12:8]==0);end
+                                2: draw_shift<=accumulator[2:0];
+                                3: begin draw_half<=0;draw_collision<=0;state<=DRAW_READ;end
+                                default: state<=READ;
+                            endcase
                         end
                         default: state<=STOP;
                     endcase
@@ -133,6 +140,18 @@ module chip8_core #(parameter integer CLOCK_HZ=1000000) (
                     state<=FH;
                 end
                 WRITE: if(mem_ready) state<=FH;
+                DRAW_READ: if(mem_ready) begin
+                    instruction[7:0]<=mem_rdata ^ draw_mask;
+                    draw_collision<=draw_collision || ((mem_rdata & draw_mask)!=0);
+                    state<=DRAW_WRITE;
+                end
+                DRAW_WRITE: if(mem_ready) begin
+                    if(!draw_half && draw_shift!=0 && pointer[2:0]!=7 && shifted_sprite[7:0]!=0) begin
+                        pointer<=sum;draw_half<=1;state<=DRAW_READ;
+                    end else begin
+                        accumulator<={7'd0,draw_collision};zero<=!draw_collision;state<=FH;
+                    end
+                end
                 default: state<=STOP;
             endcase
         end

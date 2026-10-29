@@ -5,7 +5,7 @@ using an Adafruit Feather RP2350 as its external ROM/RAM and I/O companion.
 The hard area budget is one IHP tile. See [architecture](docs/architecture.md)
 for the execution model, compatibility profile, memory map and bus protocol.
 
-The game retains 4 KB of CHIP-8 memory and a 64x32 display. The 2,080-byte
+The game retains 4 KB of CHIP-8 memory and a 64x32 display. The 1,824-byte
 interpreter and 45 bytes of live working state occupy additional companion
 memory. V registers are external; arithmetic/drawing/decoding execute on chip.
 The interpreter ROM must be loaded at 0x1200 before releasing reset.

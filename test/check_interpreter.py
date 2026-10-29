@@ -23,7 +23,7 @@ async def compare(dut,ops,data=None):
         if cpu.halted:break
         cpu.step()
     else:raise AssertionError('Native timeout')
-    if cpu.writes!=ref.writes:
+    if [(a,v) for a,v in cpu.writes if not 0x1000<=a<0x1100]!=[(a,v) for a,v in ref.writes if not 0x1000<=a<0x1100]:
         for i,(a,b) in enumerate(zip(cpu.writes,ref.writes)):
             if a!=b:raise AssertionError(f'Write {i}: {a} vs {b}; native PC={cpu.pc:x}')
         raise AssertionError(f'Write count {len(cpu.writes)} vs {len(ref.writes)}; PC {cpu.pc:x}')

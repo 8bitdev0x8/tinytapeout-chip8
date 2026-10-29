@@ -150,13 +150,17 @@ class Companion:
                      for i in range(int(d.write_count.value))]
 
 
+def data_trace(writes):
+    return [(a,v) for a,v in writes if not 0x1000<=a<0x1100]
+
+
 async def compare(dut, ops, data=None):
     ram = image(ops, data)
     reference = Reference(ram)
     reference.run()
     companion = Companion(dut, ram)
     await companion.run()
-    assert companion.writes == reference.writes, 'Memory write trace differs from instruction model'
+    assert data_trace(companion.writes) == data_trace(reference.writes), 'Memory write trace differs from instruction model'
     assert companion.ram[:0x1122] == reference.ram[:0x1122]
     return companion
 
@@ -294,7 +298,16 @@ async def independent_test_rom_screens(dut):
         await companion.run(watch_addr=reference.loop_pc)
         assert not int(dut.uo_out.value)&32, name+' unexpectedly halted' 
         assert companion.ram[0x1000:0x1100] == expected, name+' hardware screen mismatch'
-        assert companion.writes == reference.writes, name+' write trace mismatch'
+        assert data_trace(companion.writes) == data_trace(reference.writes), name+' write trace mismatch'
         Path('output').mkdir(exist_ok=True)
         Path('output', name+'.frame').write_bytes(companion.ram[0x1000:0x1100])
         dut._log.info('%s matches all 2048 reference pixels in %d clocks', name, companion.cycles)
+
+
+@cocotb.test()
+async def basic_instruction_throughput(dut):
+    ops=[0x6000]+[0x7001]*128+[0xa900,0xf055,0xffff]
+    c=await compare(dut,ops)
+    assert c.ram[0x900]==128
+    dut._log.info('BASIC_BENCH: %d CHIP-8 instructions, %d clocks, %.1f instructions/s at 1 MHz',
+                  len(ops),c.cycles,len(ops)*1000000/c.cycles)
