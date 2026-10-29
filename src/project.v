@@ -26,7 +26,7 @@ module tt_um_chip8_feather (
         if (!rst_n) begin
             ack_meta <= 0; ack <= 0; phase <= 0; wait_low <= 0;
         end else begin
-            ack_meta <= uio_in[6];
+            ack_meta <= ui_in[0];
             ack <= ack_meta;
             if (ena) begin
                 if (wait_low) begin
@@ -42,13 +42,14 @@ module tt_um_chip8_feather (
     chip8_core core (
         .clk(clk), .rst_n(rst_n),
         .mem_valid(valid), .mem_write(wr), .mem_addr(addr), .mem_wdata(wdata),
-        .mem_ready(ready), .mem_rdata(ui_in), .halted(halted),
+        .mem_ready(ready), .mem_rdata(uio_in), .halted(halted),
         .sound_active(sound), .debug_pc(unused_pc), .debug_v0(unused_v0)
     );
-    assign uo_out = (phase == 0) ? addr[7:0] :
-                    (phase == 1) ? {3'd0, addr[12:8]} : wdata;
-    assign uio_out = {2'b00, halted, sound, wr, request, phase};
-    assign uio_oe = 8'h3f;
-    wire _unused = &{1'b0, uio_in[7], uio_in[5:0], unused_pc, unused_v0};
+    assign uio_out = (phase == 0) ? addr[7:0] :
+                     (phase == 1) ? {3'd0, addr[12:8]} : wdata;
+    // Release the shared byte bus before the read-data phase begins.
+    assign uio_oe = ((phase == 2) && !wr) ? 8'h00 : 8'hff;
+    assign uo_out = {2'b00, halted, sound, wr, request, phase};
+    wire _unused = &{1'b0, ui_in[7:1], unused_pc, unused_v0};
 endmodule
 `default_nettype wire

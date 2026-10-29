@@ -1,5 +1,6 @@
 """Black-box tests of the synthesized pin interface, shared by RTL and gates."""
 import random
+from pathlib import Path
 import cocotb
 from cocotb.triggers import Timer
 
@@ -42,6 +43,10 @@ class Reference:
             kk, addr = op&255, op&4095
             a, b = self.v[x], self.v[y]
             if op == 0xffff:
+                self.loop_pc = None
+                return
+            if op == (0x1000 | ((self.pc-2)&4095)):
+                self.loop_pc = self.pc-2
                 return
             if op == 0xe0:
                 for z in range(256): self.write(0x1000+z, 0)
@@ -122,15 +127,24 @@ class Companion:
         self.stable = None
         self.sound_seen = False
         self.delay = 0
+        self.read_counts = {}
+        self.sound_start = None
+        self.sound_stop = None
 
     async def cycle(self):
         d = self.dut
         d.clk.value = 0
         await Timer(100, unit='ns')
-        status, output = int(d.uio_out.value), int(d.uo_out.value)
-        assert int(d.uio_oe.value) == 0x3f
+        status, output = int(d.uo_out.value), int(d.uio_out.value)
         request, phase, write = bool(status&4), status&3, bool(status&8)
+        expected_oe = 0 if phase == 2 and not write else 255
+        assert int(d.uio_oe.value) == expected_oe, 'Shared bus direction incorrect'
+        if status&16 and self.sound_start is None: self.sound_start = self.cycles
+        if self.sound_seen and not status&16 and self.sound_stop is None:
+            self.sound_stop = self.cycles
         self.sound_seen |= bool(status&16)
+        if phase == 2 and not write:
+            output = 0  # chip output path is disconnected while companion drives
         if request and self.stable is not None:
             assert (phase, write, output) == self.stable, 'Bus changed before acknowledge'
         if not request:
@@ -157,6 +171,7 @@ class Companion:
                         self.ram[address] = output
                         self.writes.append((address, output))
                     else:
+                        self.read_counts[address] = self.read_counts.get(address, 0)+1
                         if address == 0x1120:
                             self.polls += 1
                             self.key_snapshot = self.key_source(self.cycles, self.polls)
@@ -164,14 +179,14 @@ class Companion:
                         elif address == 0x1121:
                             value = self.key_snapshot>>8
                         else: value = self.ram[address]
-                        d.ui_in.value = value
+                        d.uio_in.value = value
                 self.ack = True
-        d.uio_in.value = 0x40 if self.ack else 0
+        d.ui_in.value = 1 if self.ack else 0
         await Timer(400, unit='ns')
         d.clk.value = 1
         await Timer(500, unit='ns')
         self.cycles += 1
-        return bool(int(d.uio_out.value)&32)
+        return bool(int(d.uo_out.value)&32)
 
     async def reset(self):
         d = self.dut
@@ -281,8 +296,10 @@ async def timers_run_during_key_wait(dut):
         return 1 if 51000 <= cycle < 53000 else 0
     c = Companion(dut, ram, key_source)
     await c.run(limit=60000)
-    assert c.sound_seen and not int(dut.uio_out.value)&16
+    assert c.sound_seen and not int(dut.uo_out.value)&16
     assert c.ram[0x900:0x903] == bytes([2,0,0])
+    # The divider is reset with the CPU, so the second tick is at 33334 clocks.
+    assert 33330 <= c.sound_stop <= 33340, c.sound_stop
 
 
 @cocotb.test()
@@ -301,3 +318,46 @@ async def stack_faults_and_invalid_opcodes(dut):
     c = Companion(dut, image([0x6007, 0xa900, 0xf055, 0xffff]))
     await c.run()
     assert c.ram[0x900] == 7
+
+
+@cocotb.test()
+async def nested_stack_and_address_boundaries(dut):
+    ops = [0x2300, 0xa900, 0xff55, 0xffff]
+    ops += [0]*((0x300-0x200)//2-len(ops))
+    for level in range(15):
+        ops += [0x7301, 0x2000|(0x300+(level+1)*6), 0x00ee]
+    ops += [0x7301, 0x00ee]
+    c = await compare(dut, ops)
+    assert c.ram[0x903] == 16
+    # Fetch through the end of RAM and wrap PC to zero; load/store wrap too.
+    await compare(dut, [0x1ffe], {
+        0xffe: bytes.fromhex('60 07'),
+        0x000: bytes.fromhex('13 00'),
+        0x300: bytes.fromhex('a9 00 f0 55 ff ff')})
+    await compare(dut, [0xafff, 0xf165, 0xa900, 0xf155, 0xffff],
+                  {0xfff: bytes([0x72]), 0: bytes([0x36])})
+    await compare(dut, [0x6072, 0x6136, 0xafff, 0xf155, 0xffff])
+
+
+@cocotb.test()
+async def independent_test_rom_screens(dut):
+    fixtures = Path(__file__).parent/'roms'
+    for name in ('1-chip8-logo.ch8','2-ibm-logo.ch8','3-corax.ch8','4-flags.ch8'):
+        initial = image([], {0x200: (fixtures/name).read_bytes()})
+        reference = Reference(initial)
+        reference.run(limit=20000)
+        expected = (fixtures/(name+'.frame')).read_bytes()
+        assert reference.ram[0x1000:0x1100] == expected, name+' reference screen mismatch'
+        assert reference.loop_pc is not None
+        companion = Companion(dut, initial)
+        await companion.reset()
+        for _ in range(500000):
+            assert not await companion.cycle(), name+' unexpectedly halted'
+            if companion.read_counts.get(reference.loop_pc, 0) >= 3:
+                break
+        else: raise AssertionError(name+' never reached final loop')
+        assert companion.ram[0x1000:0x1100] == expected, name+' hardware screen mismatch'
+        assert companion.writes == reference.writes, name+' write trace mismatch'
+        Path('output').mkdir(exist_ok=True)
+        Path('output', name+'.frame').write_bytes(companion.ram[0x1000:0x1100])
+        dut._log.info('%s matches all 2048 reference pixels', name)

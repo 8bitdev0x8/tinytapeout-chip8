@@ -15,7 +15,9 @@ Initialize the companion RAM and font, load a ROM at 0x200, and clear the
 framebuffer. Hold reset low for multiple clock edges with acknowledgement
 low. Release reset with ena high. Service the three-phase byte bus using
 four-phase request/acknowledge handshakes. Phase 0 sends address low, phase 1
-address high, and phase 2 transfers data. uio[2] is request; uio[6] is ack.
+address high, and phase 2 transfers data. uo[2] is request; ui[0] is ack. The shared byte bus is uio[7:0].
+The companion drives it only during a phase-2 read, releasing it before ack
+falls.
 The chip synchronizes ack. Hold response data stable throughout acknowledge.
 
 Run the cocotb suite for instruction-level comparison, framebuffer writes,

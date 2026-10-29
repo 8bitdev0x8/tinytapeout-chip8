@@ -60,15 +60,14 @@ The standard top module serializes each byte transaction into three phases:
 
 | Pin | Direction | Meaning |
 | --- | --- | --- |
-| ui[7:0] | Into chip | Read response byte |
-| uo[7:0] | Out of chip | Request byte for the current phase |
-| uio[1:0] | Out | Phase 0=address low, 1=address high, 2=data |
-| uio[2] | Out | Request valid |
-| uio[3] | Out | Write operation |
-| uio[4] | Out | Sound timer active (tone enable) |
-| uio[5] | Out | Halted |
-| uio[6] | In | Companion acknowledgement |
-| uio[7] | In | Unused |
+| uio[7:0] | Bidirectional | Shared address/data byte bus |
+| uo[1:0] | Out | Phase 0=address low, 1=address high, 2=data |
+| uo[2] | Out | Request valid |
+| uo[3] | Out | Write operation |
+| uo[4] | Out | Sound timer active (tone enable) |
+| uo[5] | Out | Halted |
+| ui[0] | In | Companion acknowledgement |
+| ui[7:1], uo[7:6] | Unused | Reserved |
 
 Each phase uses a four-phase level handshake:
 
@@ -79,8 +78,11 @@ Each phase uses a four-phase level handshake:
 4. The companion lowers acknowledgement after seeing request go low.
    The chip waits for that low level before starting another phase.
 
-Phase 1 sends {000, address[12:8]}. Phase 2 sends write data for writes;
-its output byte is ignored for reads. Complete the write exactly once at
+Phase 1 sends {000, address[12:8]}. Phase 2 sends write data for writes.
+The chip releases all eight uio pins for a phase-2 read; the companion must
+only drive the shared bus in that phase. Release those pins before lowering
+acknowledgement, after the chip lowers request, so there is no contention
+when the next address phase begins. Complete the write exactly once at
 phase 2, even if acknowledgement stays high for many clocks. Keep read data
 stable from before acknowledgement rises until after request falls.
 
@@ -89,10 +91,11 @@ uses the stable-bus handshake above rather than independent bit synchronizers.
 Hold acknowledgement low through reset. Keep ena high during execution;
 selection is not an architectural pause. The chip uses a 1 MHz external clock
 by default. No FPGA/Feather pin numbers have yet been assigned to this bus.
-The bus needs 8 input, 8 output, and 7 control/status signals in addition to
-clock/reset; not all signals need direct Feather pins (e.g. status outputs
-may be left unconnected). A real wiring/PIO allocation remains to be checked
-against HSTX and UART usage before connecting hardware.
+The bus uses eight shared data pins, five handshake/control pins, and
+clock/reset: 15 companion GPIOs, or 17 including optional sound/halt status.
+This leaves room in the Feather's 21 header GPIOs for UART input while HSTX
+uses its separate connector. Actual GPIO numbers and PIO allocation still
+need checking before connecting hardware.
 
 ## Timers and sound
 
@@ -110,7 +113,12 @@ and checks handshake stability. An independent instruction-level model
 checks every memory write for arithmetic/flag vectors, control flow, BCD,
 register transfers, random masks, sprites, collisions, and clipping. Other
 tests cover keypad skips/waits, timers, stack faults, and invalid instructions.
-The same suite runs on the synthesized gate-level netlist.
+The same suite runs on the synthesized gate-level netlist. Four independent
+Timendus test ROMs (CHIP-8 logo, IBM logo, Corax+ opcodes and flags) must also
+match all 2048 pixels of their published reference screenshots. Fixtures are
+pinned to a commit and retain their separate GPL-3.0 license under test/roms.
+The display-wait/quirks and interactive keypad ROMs are not claimed to pass;
+the keypad and timer behavior above are covered by targeted tests.
 
 The IHP allocation is provisionally 4x2 tiles for the expanded processor.
 This is an experiment, not a purchase or area guarantee. The complete layout
