@@ -1,0 +1,19 @@
+name: live-rtl-simulator
+on:
+  push:
+    paths:
+      - 'sim/**'
+      - '.github/workflows/sim.yaml'
+  workflow_dispatch:
+jobs:
+  simulator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Verify ROM screens, stepping and event-level VCD
+        run: python sim/check_live.py

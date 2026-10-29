@@ -40,3 +40,11 @@ The earlier direct CHIP-8 decoder remains in Git history at 82f1b8e.
 No chip has been ordered. Feather RAM-server/video/controller firmware and
 actual wiring remain to be implemented and checked. One-tile fit and speed
 are experimental until verified by the current build and hardware testing.
+
+## Interactive RTL debugger
+
+Run `python sim/server.py` and open http://127.0.0.1:8765 to load a ROM, run
+the actual Verilog, inspect signal waveforms, step clocks/instructions, and
+capture an event-level VCD. See [sim/README.md](sim/README.md) for setup and
+controls. The browser draws results from Icarus; it does not emulate CHIP-8.
+This local debugger does not change the ASIC or its one-tile allocation.

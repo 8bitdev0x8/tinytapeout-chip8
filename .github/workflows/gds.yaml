@@ -2,6 +2,12 @@ name: gds
 
 on:
   push:
+    # Local debugger/docs changes do not change the silicon.
+    paths:
+      - 'src/**'
+      - 'info.yaml'
+      - 'firmware/**'
+      - 'test/**'
   workflow_dispatch:
 
 jobs:
