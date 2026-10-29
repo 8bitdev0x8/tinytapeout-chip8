@@ -9,7 +9,7 @@ def execute(coro):
     try: coro.send(None)
     except StopIteration as result: return result.value
     raise AssertionError('unexpected suspension')
-source=ast.parse(Path('test/test.py').read_text()); ns={'random':random,'Path':Path}
+source=ast.parse(Path('test/test.py').read_text()); ns={'random':random,'Path':Path,'__file__':str(Path('test/test.py').resolve())}
 nodes=[n for n in source.body if (isinstance(n,ast.ClassDef) and n.name=='Reference') or (isinstance(n,ast.FunctionDef) and n.name=='image') or (isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='FONT' for t in n.targets))]
 exec(compile(ast.Module(body=nodes,type_ignores=[]),'tests','exec'),ns)
 async def compare(dut,ops,data=None):
