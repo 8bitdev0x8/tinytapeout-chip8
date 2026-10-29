@@ -120,7 +120,7 @@ pinned to a commit and retain their separate GPL-3.0 license under test/roms.
 The display-wait/quirks and interactive keypad ROMs are not claimed to pass;
 the keypad and timer behavior above are covered by targeted tests.
 
-The IHP allocation is provisionally 4x2 tiles for the expanded processor.
+The IHP allocation is provisionally 2x2 tiles for the expanded processor.
 This is an experiment, not a purchase or area guarantee. The complete layout
 must pass routing, timing, gate-level tests and precheck before submission.
 Feather UART decoding, RAM server, video and audio firmware remain separate

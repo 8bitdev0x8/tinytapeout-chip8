@@ -18,7 +18,7 @@ layout, reset requirements, and the pin protocol are described in
 - `test/test.py`: pin-level cocotb tests and instruction-level oracle.
 - `test/tb_chip8_core.v`: minimal standalone core smoke test.
 - `controller-mapping.md`: provisional DualSense mapping.
-- `info.yaml`: provisional 4x2 IHP allocation and 1 MHz clock target.
+- `info.yaml`: provisional 2x2 IHP allocation and 1 MHz clock target.
 
 ## Simulation
 

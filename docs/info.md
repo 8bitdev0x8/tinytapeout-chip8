@@ -7,7 +7,7 @@ instructions are implemented; legacy 0nnn calls are ignored. No Super-CHIP
 or XO-CHIP extensions. See docs/architecture.md in the repository for the
 complete compatibility profile and memory protocol.
 
-The 4x2 IHP allocation and 1 MHz clock are provisional build targets.
+The 2x2 IHP allocation and 1 MHz clock are provisional build targets.
 
 ## How to test
 

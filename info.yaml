@@ -6,7 +6,7 @@ project:
     RP2350
   language: Verilog
   clock_hz: 1000000
-  tiles: 4x2
+  tiles: 2x2
   top_module: tt_um_chip8_feather
   source_files:
   - project.v
