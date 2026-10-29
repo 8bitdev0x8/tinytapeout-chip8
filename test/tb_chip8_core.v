@@ -61,7 +61,7 @@ module tb_chip8_core;
         if (halted || v0 !== 8'd3 || !saw_loop || transfers < 12)
             $fatal(1, "Program failed: V0=%h PC=%h", v0, pc);
         // Replace loop with an unsupported instruction, which must halt.
-        ram['h206] = 0; ram['h207] = 0;
+        ram['h206] = 8'hff; ram['h207] = 8'hff;
         repeat (40) @(negedge clk);
         if (!halted || valid) $fatal(1, "Unsupported opcode did not halt");
         // Reset must recover from halt and clear registers.
